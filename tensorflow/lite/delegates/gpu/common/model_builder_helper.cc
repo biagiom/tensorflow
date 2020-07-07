@@ -141,17 +141,6 @@ int GetNumberOfConstInputsForNode(const TfLiteContext* context,
          GetNumberOfRuntimeInputsForNode(context, tflite_node);
 }
 
-int GetNumberOfRuntimeOutputsForNode(const TfLiteContext* context,
-                                     const TfLiteNode* tflite_node) {
-  int number_of_runtime_outputs = 0;
-  for (int i = 0; i < tflite_node->outputs->size; i++) {
-    if (!IsConstantTensor(&context->tensors[tflite_node->outputs->data[i]])) {
-      number_of_runtime_outputs++;
-    }
-  }
-  return number_of_runtime_outputs;
-}
-
 absl::Status CheckInputsOutputs(const TfLiteContext* context,
                                 const TfLiteNode* tflite_node,
                                 int runtime_inputs, int outputs) {
@@ -162,12 +151,11 @@ absl::Status CheckInputsOutputs(const TfLiteContext* context,
         "Expected ", runtime_inputs, " runtime input tensor(s), but node has ",
         runtime_inputs_from_model, " runtime input(s)."));
   }
-  const int runtime_outputs =
-      GetNumberOfRuntimeOutputsForNode(context, tflite_node);
-  if (runtime_outputs != outputs) {
+  const int outputs_from_model = NumOutputs(tflite_node);
+  if (outputs_from_model != outputs) {
     return absl::InternalError(absl::StrCat("Expected ", outputs,
                                             " output tensor(s), but node has ",
-                                            runtime_outputs, " output(s)."));
+                                            outputs_from_model, " output(s)."));
   }
   return absl::OkStatus();
 }
@@ -259,18 +247,25 @@ absl::Status SetAllDimensions(const TfLiteIntArray* dimensions, Linear* shape) {
 }
 
 absl::Status SetAllDimensions(const TfLiteIntArray* dimensions, HWC* shape) {
-  if (dimensions->size != 4) {
-    return absl::InvalidArgumentError(
-        absl::StrCat("Expected a 4D tensor of shape 1xHxWxC but got ",
-                     GetDimensionString(dimensions)));
+  if (dimensions->size == 3) {
+    shape->h = dimensions->data[0];
+    shape->w = dimensions->data[1];
+    shape->c = dimensions->data[2];
+    return absl::OkStatus();
   }
-  if (dimensions->data[0] != 1) {
-    return absl::UnimplementedError("Batch size is not equal to 1.");
+  if (dimensions->size == 4) {
+    if (dimensions->data[0] != 1) {
+      return absl::UnimplementedError("Batch size is not equal to 1.");
+    }
+    shape->h = dimensions->data[1];
+    shape->w = dimensions->data[2];
+    shape->c = dimensions->data[3];
+    return absl::OkStatus();
   }
-  shape->h = dimensions->data[1];
-  shape->w = dimensions->data[2];
-  shape->c = dimensions->data[3];
-  return absl::OkStatus();
+  return absl::InvalidArgumentError(
+      absl::StrCat("Expected a 3D tensor of shape HxWxC or a 4D tensor of "
+                   "shape 1xHxWxC but got ",
+                   GetDimensionString(dimensions)));
 }
 
 absl::Status SetAllDimensions(const TfLiteIntArray* dimensions, HW* shape) {

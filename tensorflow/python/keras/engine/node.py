@@ -27,8 +27,8 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.keras import backend
 from tensorflow.python.keras.engine import base_layer_utils
+from tensorflow.python.keras.engine import keras_tensor
 from tensorflow.python.keras.utils import tf_utils
-from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util import nest
 from tensorflow.python.util import serialization
 
@@ -80,11 +80,13 @@ class Node(object):
     self._single_positional_tensor_passed = (not self.call_kwargs and len(
         self.call_args) == 1 and tensor_util.is_tensor(self.call_args[0]))
 
-    # Create TensorFlowOpLayers if needed.
-    for obj in self._flat_arguments:
-      if (isinstance(obj, ops.Tensor) and
-          base_layer_utils.needs_keras_history(obj, ignore_call_context=True)):
-        base_layer_utils.create_keras_history(obj)
+    if not keras_tensor.keras_tensors_enabled():
+      # Create TensorFlowOpLayers if needed.
+      for obj in self._flat_arguments:
+        if (isinstance(obj, ops.Tensor) and
+            base_layer_utils.needs_keras_history(
+                obj, ignore_call_context=True)):
+          base_layer_utils.create_keras_history(obj)
 
     self._keras_inputs = []
     self._keras_inputs_ids_and_indices = []
@@ -172,13 +174,11 @@ class Node(object):
       json.dumps(kwargs, default=serialization.get_json_type)
     except TypeError:
       kwarg_types = nest.map_structure(type, kwargs)
-      logging.warning('Layer ' + self.layer.name +
+      raise TypeError('Layer ' + self.layer.name +
                       ' was passed non-JSON-serializable arguments. ' +
                       'Arguments had types: ' +
-                      str(kwarg_types) + '. They will not be included '
-                      'in the serialized model (and thus will be missing '
-                      'at deserialization time).')
-      kwargs = {}
+                      str(kwarg_types) + '. They cannot be serialized out '
+                      'when saving the model.')
 
     # `kwargs` is added to each Tensor in the first arg. This should be
     # changed in a future version of the serialization format.
@@ -190,6 +190,10 @@ class Node(object):
         new_node_index = node_conversion_map.get(node_key, 0)
         data = [kh.layer.name, new_node_index, kh.tensor_index, kwargs]
       else:
+        # If an element in the first call argument did not originate as a
+        # keras tensor and is a constant value, we save it using the format
+        # ['_CONSTANT_VALUE', -1, serializaed_tensor_or_python_constant]
+        # (potentially including serialized kwargs in an optional 4th argument
         data = [_CONSTANT_VALUE, -1, _serialize_keras_tensor(t), kwargs]
       return tf_utils.ListWrapper(data)
 

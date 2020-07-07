@@ -67,6 +67,7 @@ from tensorflow.python.types import internal
 from tensorflow.python.util import compat
 from tensorflow.python.util import decorator_utils
 from tensorflow.python.util import deprecation
+from tensorflow.python.util import dispatch
 from tensorflow.python.util import function_utils
 from tensorflow.python.util import lock_util
 from tensorflow.python.util import memory
@@ -183,16 +184,8 @@ def _override_helper(clazz_object, operator, func):
     func: the function that replaces the overridden operator.
 
   Raises:
-    ValueError: If operator has already been overwritten,
-      or if operator is not allowed to be overwritten.
+    ValueError: If operator is not allowed to be overwritten.
   """
-  existing = getattr(clazz_object, operator, None)
-  if existing is not None:
-    # Check to see if this is a default method-wrapper or slot wrapper which
-    # will be true for the comparison operators.
-    if not isinstance(existing, type(object.__lt__)):
-      raise ValueError("operator %s cannot be overwritten again on class %s." %
-                       (operator, clazz_object))
   if operator not in Tensor.OVERLOADABLE_OPERATORS:
     raise ValueError("Overriding %s is disallowed" % operator)
   setattr(clazz_object, operator, func)
@@ -1265,11 +1258,13 @@ EagerTensor = pywrap_tfe.TFE_Py_InitEagerTensor(_EagerTensorBase)
 
 
 @tf_export(v1=["convert_to_tensor"])
-def convert_to_tensor_v1(value,
-                         dtype=None,
-                         name=None,
-                         preferred_dtype=None,
-                         dtype_hint=None):
+@dispatch.add_dispatch_support
+def convert_to_tensor_v1_with_dispatch(
+    value,
+    dtype=None,
+    name=None,
+    preferred_dtype=None,
+    dtype_hint=None):
   """Converts the given `value` to a `Tensor`.
 
   This function converts Python objects of various types to `Tensor`
@@ -1319,24 +1314,41 @@ def convert_to_tensor_v1(value,
     RuntimeError: If a registered conversion function returns an invalid value.
     ValueError: If the `value` is a tensor not of given `dtype` in graph mode.
   """
+  return convert_to_tensor_v1(value, dtype=dtype, name=name,
+                              preferred_dtype=preferred_dtype,
+                              dtype_hint=dtype_hint)
+
+
+def convert_to_tensor_v1(value,
+                         dtype=None,
+                         name=None,
+                         preferred_dtype=None,
+                         dtype_hint=None):
+  """Converts the given `value` to a `Tensor` (with the TF1 API)."""
   preferred_dtype = deprecation.deprecated_argument_lookup(
       "dtype_hint", dtype_hint, "preferred_dtype", preferred_dtype)
   return convert_to_tensor_v2(value, dtype, preferred_dtype, name)
 
 
 @tf_export("convert_to_tensor", v1=[])
-def convert_to_tensor_v2(value, dtype=None, dtype_hint=None, name=None):
+@dispatch.add_dispatch_support
+def convert_to_tensor_v2_with_dispatch(
+    value, dtype=None, dtype_hint=None, name=None):
   """Converts the given `value` to a `Tensor`.
 
   This function converts Python objects of various types to `Tensor`
   objects. It accepts `Tensor` objects, numpy arrays, Python lists,
-  and Python scalars. For example:
+  and Python scalars.
 
+  For example:
+
+  >>> import numpy as np
   >>> def my_func(arg):
   ...   arg = tf.convert_to_tensor(arg, dtype=tf.float32)
   ...   return arg
 
   >>> # The following calls are equivalent.
+  ...
   >>> value_1 = my_func(tf.constant([[1.0, 2.0], [3.0, 4.0]]))
   >>> print(value_1)
   tf.Tensor(
@@ -1382,6 +1394,12 @@ def convert_to_tensor_v2(value, dtype=None, dtype_hint=None, name=None):
     RuntimeError: If a registered conversion function returns an invalid value.
     ValueError: If the `value` is a tensor not of given `dtype` in graph mode.
   """
+  return convert_to_tensor_v2(
+      value, dtype=dtype, dtype_hint=dtype_hint, name=name)
+
+
+def convert_to_tensor_v2(value, dtype=None, dtype_hint=None, name=None):
+  """Converts the given `value` to a `Tensor`."""
   return convert_to_tensor(
       value=value,
       dtype=dtype,
@@ -5142,9 +5160,8 @@ class Graph(object):
   def _auto_cast_variable_read_dtype(self, dtype):
     self._thread_local._auto_cast_variable_read_dtype = dtype  # pylint: disable=protected-access
 
-  @tf_contextlib.contextmanager
   def _enable_auto_casting_variables(self, dtype):
-    """Context manager to automatically cast AutoCastVariables.
+    """Returns a context manager to automatically cast AutoCastVariables.
 
     If an AutoCastVariable `var` is used under this context manager, it will be
     casted to `dtype` before being used.
@@ -5154,15 +5171,10 @@ class Graph(object):
     Args:
       dtype: The dtype that AutoCastVariables should be casted to.
 
-    Yields:
-      Nothing.
+    Returns:
+      Context manager.
     """
-    prev_read_dtype = self._auto_cast_variable_read_dtype
-    try:
-      self._auto_cast_variable_read_dtype = dtype
-      yield
-    finally:
-      self._auto_cast_variable_read_dtype = prev_read_dtype
+    return enable_auto_cast_variables(dtype, graph=self)
 
   def _mutation_lock(self):
     """Returns a lock to guard code that creates & mutates ops.
@@ -5177,6 +5189,36 @@ class Graph(object):
     See the comment for self._group_lock for more info.
     """
     return self._group_lock.group(_SESSION_RUN_LOCK_GROUP)
+
+
+class enable_auto_cast_variables(object):
+  """Enables the autocasting of `AutoCastVariable`s.
+
+  Under this context manager, `AutoCastVariable`s will be cast to `dtype` if
+  `dtype` is floating-point. Otherwise, `AutoCastVariable`s will not be cast.
+  """
+
+  def __init__(self, dtype, graph=None):
+    if dtype and not dtype.is_floating:
+      self._dtype = None
+    else:
+      self._dtype = dtype
+    if graph is None:
+      self._graph = get_default_graph()
+    else:
+      self._graph = graph
+
+  def __enter__(self):
+    # For performance, access `_thread_local` attr directly rather than
+    # @property wrappers.
+    graph_thread_local = self._graph._thread_local
+    self._prev_read_dtype = getattr(graph_thread_local,
+                                    "_auto_cast_variable_read_dtype", None)
+    graph_thread_local._auto_cast_variable_read_dtype = self._dtype
+
+  def __exit__(self, type_arg, value_arg, traceback_arg):
+    self._graph._thread_local._auto_cast_variable_read_dtype = (
+        self._prev_read_dtype)
 
 
 # TODO(agarwal): currently device directives in an outer eager scope will not
@@ -6391,9 +6433,7 @@ def name_scope(name, default_name=None, values=None, skip_on_eager=True):
   Returns:
     `name_scope*` context manager.
   """
-  ctx = context.context()
-  in_eager_mode = ctx.executing_eagerly()
-  if not in_eager_mode:
+  if not context.executing_eagerly():
     return internal_name_scope_v1(name, default_name, values)
 
   if skip_on_eager:

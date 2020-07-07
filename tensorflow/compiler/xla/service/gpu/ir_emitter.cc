@@ -32,7 +32,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter_nested.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter_unnested.h"
-#include "tensorflow/compiler/xla/service/gpu/partition_assignment.h"
+#include "tensorflow/compiler/xla/service/gpu/launch_dimensions.h"
 #include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
@@ -236,12 +236,22 @@ bool IrEmitter::MaybeEmitDirectAtomicOperation(
   if (root_opcode == HloOpcode::kAdd) {
     llvm::Triple target_triple = llvm::Triple(module_->getTargetTriple());
     // NVPTX supports atomicAdd on F32 and integer types.
-    if (target_triple.isNVPTX() && element_type == F32) {
-      // F32 + F32
-      AtomicRMW(llvm::AtomicRMWInst::FAdd, output_address, source,
-                llvm::AtomicOrdering::SequentiallyConsistent);
-      return true;
+    if (target_triple.isNVPTX()) {
+      // "atom.add.f64 requires sm_60 or higher."
+      // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-atom
+      bool f64_atomic_add_supported =
+          ir_emitter_context_->cuda_compute_capability()->cc_major >= 6;
+
+      bool atomic_add_supported =
+          element_type == F32 ||
+          (f64_atomic_add_supported && element_type == F64);
+      if (atomic_add_supported) {
+        AtomicRMW(llvm::AtomicRMWInst::FAdd, output_address, source,
+                  llvm::AtomicOrdering::SequentiallyConsistent);
+        return true;
+      }
     }
+
     if (is_atomic_integral) {
       // integral + integral
       AtomicRMW(llvm::AtomicRMWInst::Add, output_address, source,

@@ -18,6 +18,7 @@ limitations under the License.
 #include <stdint.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <list>
 #include <utility>
 
@@ -163,6 +164,7 @@ void SimpleOrcJIT::NotifyObjectFinalized(
   uint64_t key = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(object.getData().data()));
   gdb_jit_event_listener_->notifyObjectLoaded(key, object, object_info);
+  size_of_generated_code_in_bytes_ += object.getData().size();
 }
 
 void SimpleOrcJIT::NotifyObjectFreed(const llvm::object::ObjectFile& object) {
@@ -223,6 +225,7 @@ namespace {
 bool RegisterKnownJITSymbols() {
   xla::CustomCallTargetRegistry* registry =
       xla::CustomCallTargetRegistry::Global();
+  registry->Register("printf", reinterpret_cast<void*>(&printf), "Host");
 
 #define REGISTER_CPU_RUNTIME_SYMBOL(base_name)                               \
   do {                                                                       \

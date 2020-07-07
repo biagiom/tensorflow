@@ -1217,7 +1217,7 @@ Status IrEmitter::HandleFft(HloInstruction* fft) {
   auto operand = fft->operand(0);
   TF_RETURN_IF_ERROR(ElementTypesSameAndSupported(
       /*instruction=*/*fft, /*operands=*/{operand},
-      /*supported_types=*/{F32, C64}));
+      /*supported_types=*/{F32, F64, C64, C128}));
   TF_RET_CHECK(LayoutUtil::IsMonotonicWithDim0Major(operand->shape().layout()));
   TF_RET_CHECK(LayoutUtil::IsMonotonicWithDim0Major(fft->shape().layout()));
   VLOG(3) << "operand=" << ShapeUtil::HumanStringWithLayout(operand->shape());
@@ -1239,7 +1239,7 @@ Status IrEmitter::HandleFft(HloInstruction* fft) {
   llvm::FunctionType* fft_type = llvm::FunctionType::get(
       b_.getVoidTy(),
       {int8_ptr_type, int8_ptr_type, int8_ptr_type, int32_type, int32_type,
-       int64_type, int64_type, int64_type, int64_type},
+       int32_type, int64_type, int64_type, int64_type, int64_type},
       /*isVarArg=*/false);
 
   bool multi_threaded_eigen =
@@ -1258,6 +1258,8 @@ Status IrEmitter::HandleFft(HloInstruction* fft) {
        {GetExecutableRunOptionsArgument(),
         BitCast(GetEmittedValueFor(fft), int8_ptr_type),
         BitCast(operand_address, int8_ptr_type), b_.getInt32(fft->fft_type()),
+        b_.getInt32(operand->shape().element_type() == F64 ||
+                    operand->shape().element_type() == C128),
         b_.getInt32(fft_rank), b_.getInt64(input_batch),
         b_.getInt64(fft_rank > 0 ? fft_length[0] : 0),
         b_.getInt64(fft_rank > 1 ? fft_length[1] : 0),
@@ -2711,6 +2713,19 @@ StatusOr<bool> IrEmitter::EmitFastConcatenate(
   }
 
   return true;
+}
+
+llvm::Value* IrEmitter::EmitPrintf(absl::string_view fmt,
+                                   absl::Span<llvm::Value* const> arguments) {
+  llvm::Type* ptr_ty = b_.getInt8Ty()->getPointerTo();
+  std::vector<llvm::Value*> call_args;
+  call_args.push_back(b_.CreateGlobalStringPtr(llvm_ir::AsStringRef(fmt)));
+  absl::c_copy(arguments, std::back_inserter(call_args));
+  return b_.CreateCall(
+      b_.GetInsertBlock()->getParent()->getParent()->getOrInsertFunction(
+          "printf", llvm::FunctionType::get(b_.getInt32Ty(), {ptr_ty},
+                                            /*isVarArg=*/true)),
+      call_args);
 }
 
 void IrEmitter::EmitTransferElements(llvm::Value* target, llvm::Value* source,
