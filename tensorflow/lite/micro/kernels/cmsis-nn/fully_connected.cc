@@ -136,7 +136,7 @@ TfLiteStatus EvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
   // The 'if' condition can be removed when null handling of bias is added to
   // arm_fully_connected_s8
   if (nullptr != GetTensorData<int32>(bias)) {
-    RuntimeShape output_shape = GetTensorShape(output);
+    const RuntimeShape output_shape = GetTensorShape(output);
     TFLITE_DCHECK_EQ(output_shape.DimensionsCount(), 2);
     const int batches = output_shape.Dims(0);
     const int output_depth = output_shape.Dims(1);
@@ -144,6 +144,8 @@ TfLiteStatus EvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
     const int filter_dim_count = filter_shape.DimensionsCount();
     const int accum_depth = filter_shape.Dims(filter_dim_count - 1);
     const RuntimeShape input_shape = GetTensorShape(input);
+    TFLITE_DCHECK_EQ(input_shape.DimensionsCount(), 2);
+    TFLITE_DCHECK_EQ(batches, input_shape.Dims(0));
 
     cmsis_nn_fc_params fc_params;
     fc_params.input_offset = -input->params.zero_point;
@@ -159,9 +161,9 @@ TfLiteStatus EvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
 
     cmsis_nn_dims input_dims;
     input_dims.n = batches;
-    input_dims.h = input_shape.Dims(1);
-    input_dims.w = input_shape.Dims(2);
-    input_dims.c = input_shape.Dims(3);
+    input_dims.h = 1;
+    input_dims.w = 1;
+    input_dims.c = input_shape.Dims(1);
 
     cmsis_nn_dims filter_dims;
     filter_dims.n = accum_depth;
