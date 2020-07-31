@@ -21,9 +21,11 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/lite/delegates/gpu/cl/arguments.h"
+#include "tensorflow/lite/delegates/gpu/cl/buffer.h"
 #include "tensorflow/lite/delegates/gpu/cl/cl_context.h"
 #include "tensorflow/lite/delegates/gpu/cl/cl_device.h"
 #include "tensorflow/lite/delegates/gpu/cl/kernels/tuning_parameters.h"
+#include "tensorflow/lite/delegates/gpu/cl/kernels/work_group_picking.h"
 #include "tensorflow/lite/delegates/gpu/cl/precision.h"
 #include "tensorflow/lite/delegates/gpu/cl/program_cache.h"
 #include "tensorflow/lite/delegates/gpu/cl/tensor.h"
@@ -40,17 +42,6 @@ struct CreationContext {
   CLContext* context;
   CLCommandQueue* queue;
   ProgramCache* cache;
-};
-
-struct LinkingContext {
-  // variable(FLT4) name to apply subsequent transformations
-  std::string var_name;
-  // x coordinate name (as it appears in kernel) for variable
-  std::string x_coord;
-  // y coordinate name (as it appears in kernel) for variable
-  std::string y_coord;
-  // s coordinate name (as it appears in kernel) for variable
-  std::string s_coord;
 };
 
 struct OperationDef {
@@ -97,25 +88,48 @@ class GPUOperation {
   void SetSrc(Tensor* ptr, int index = 0);
   void SetDst(Tensor* ptr, int index = 0);
 
-  virtual absl::Status AddToQueue(CLCommandQueue* queue) {
-    return absl::OkStatus();
-  }
-  virtual absl::Status Tune(const TuningParameters& params) {
-    return absl::OkStatus();
+  // should be called after changes of inputs/outputs.
+  absl::Status UpdateParams();
+
+  absl::Status AddToQueue(CLCommandQueue* queue) {
+    RETURN_IF_ERROR(args_.Bind(kernel_.kernel()));
+    return queue->DispatchImplicit(kernel_, grid_size_, work_group_size_);
   }
 
-  virtual absl::Status Compile(const CreationContext& creation_context) {
-    return absl::OkStatus();
+  virtual absl::Status Tune(const TuningParameters& params) {
+    RETURN_IF_ERROR(args_.Bind(kernel_.kernel()));
+    return GetBestWorkGroup(params, kernel_, grid_size_, &work_group_size_);
   }
+
+  virtual absl::Status Compile(const CreationContext& creation_context);
+
+  virtual absl::Status PostCompileCheck() { return absl::OkStatus(); }
 
   const OperationDef& GetDefinition() const { return definition_; }
 
+  void AddSrcTensor(const std::string& tensor_name,
+                    const TensorDescriptor& desc);
+  void AddSrcBuffer(const std::string& buffer_name,
+                    const BufferDescriptor& desc);
+  void AddDstTensor(const std::string& tensor_name,
+                    const TensorDescriptor& desc);
+
  protected:
+  virtual absl::Status BindArguments() { return absl::OkStatus(); }
+  virtual int3 GetGridSize() const = 0;
+
   // Defines operation calculation precision and format of src/dst tensors.
   OperationDef definition_;
   std::vector<Tensor*> src_;
   std::vector<Tensor*> dst_;
   Arguments args_;
+  CLKernel kernel_;
+  int3 work_group_size_ = int3(8, 4, 1);
+  int3 grid_size_ = int3(0, 0, 0);
+  std::string code_;
+  std::vector<std::string> src_tensors_names_;
+  std::vector<std::string> dst_tensors_names_;
+  std::vector<CompilerOptions> compiler_options_;
   std::vector<ElementwiseOperation*> linked_operations_;
 };
 
@@ -133,10 +147,9 @@ class ElementwiseOperation : public GPUOperation {
       : GPUOperation(definition) {}
 
   virtual ~ElementwiseOperation() {}
-  absl::Status AddToQueue(CLCommandQueue* queue) override;
-  absl::Status Tune(const TuningParameters& params) override;
 
   absl::Status Compile(const CreationContext& creation_context) override;
+  int3 GetGridSize() const override;
 
   // Move only
   ElementwiseOperation(ElementwiseOperation&& operation);
@@ -144,32 +157,20 @@ class ElementwiseOperation : public GPUOperation {
   ElementwiseOperation(const ElementwiseOperation&) = delete;
   ElementwiseOperation& operator=(const ElementwiseOperation&) = delete;
 
-  virtual absl::Status SetArgs(const std::string& unique_postfix,
-                               Arguments* args) {
-    return absl::OkStatus();
-  }
-
   Arguments&& MoveArgs() { return std::move(args_); }
   std::string GetCode() const { return code_; }
+  void AddUniquePostfix(const std::string& unique_postfix);
 
-  // ovveride to return false if for any reason operation can not be linked.
-  virtual bool IsLinkable() const { return true; }
+  bool IsLinkable() const { return linkable_; }
 
  protected:
   bool check_src_channels_size_ = false;
-  std::string code_;
-  absl::Status BindArguments();
-  int3 GetGridSize() const;
-  CLKernel kernel_;
-  int3 work_group_size_ = int3(8, 4, 1);
+  bool linkable_ = true;
 };
 
 absl::Status MergeOperations(
     const std::vector<ElementwiseOperation*>& linked_ops,
     Arguments* merged_args, std::string* merged_code);
-
-absl::Status SetArguments(const std::vector<ElementwiseOperation*>& linked_ops,
-                          Arguments* args);
 
 }  // namespace cl
 }  // namespace gpu

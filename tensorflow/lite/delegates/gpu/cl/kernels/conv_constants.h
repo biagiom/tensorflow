@@ -35,10 +35,10 @@ namespace cl {
 class ConvConstants : public GPUOperation {
  public:
   ConvConstants() = default;
-  absl::Status AddToQueue(CLCommandQueue* queue) override;
-  absl::Status Tune(const TuningParameters& params) override;
 
   absl::Status Compile(const CreationContext& creation_context) override;
+  absl::Status BindArguments() override;
+  int3 GetGridSize() const override;
 
   // Move only
   ConvConstants(ConvConstants&& kernel);
@@ -68,8 +68,9 @@ class ConvConstants : public GPUOperation {
   void RearrangeWeightsData(const tflite::gpu::Tensor<OHWI, S>& weights,
                             absl::Span<T> dst);
 
-  absl::Status BindArguments();
-  int3 GetGridSize() const;
+  std::string GenerateConvolutionConstantCode(
+      const OperationDef& op_def, const int2& kernel_size, int src_channels,
+      int dst_channels, bool stride_correction, const CLDevice& device);
 
   int2 kernel_size_;
   int2 stride_;
@@ -77,9 +78,6 @@ class ConvConstants : public GPUOperation {
   int2 dilation_;
   int src_channels_;
   int dst_channels_;
-
-  CLKernel kernel_;
-  int3 work_group_size_ = int3(8, 4, 1);
 };
 
 template <DataType T>

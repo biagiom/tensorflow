@@ -27,7 +27,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.keras import backend as K
 from tensorflow.python.keras.engine.base_layer import Layer
-from tensorflow.python.keras.utils import tf_utils
+from tensorflow.python.keras.utils import control_flow_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
@@ -127,10 +127,8 @@ class BaseDenseAttention(Layer):
     def dropped_weights():
       return nn.dropout(weights, rate=self.dropout)
 
-    weights = tf_utils.smart_cond(
-        training,
-        dropped_weights,
-        lambda: array_ops.identity(weights))
+    weights = control_flow_util.smart_cond(training, dropped_weights,
+                                           lambda: array_ops.identity(weights))
     return math_ops.matmul(weights, value)
 
   # TODO(b/125916026): Consider exposing a __call__ method with named args.
@@ -192,7 +190,7 @@ class BaseDenseAttention(Layer):
         raise ValueError(
             '{} layer mask must be a list, '
             'namely [query_mask, value_mask].'.format(class_name))
-      if len(mask) != 2:
+      if len(mask) < 2 or len(mask) > len(inputs):
         raise ValueError(
             '{} layer mask must be a list of length 2, namely [query_mask, '
             'value_mask]. Given length: {}'.format(class_name, len(mask)))
@@ -266,7 +264,7 @@ class Attention(BaseDenseAttention):
   value_input = tf.keras.Input(shape=(None,), dtype='int32')
 
   # Embedding lookup.
-  token_embedding = tf.keras.layers.Embedding(max_tokens, dimension)
+  token_embedding = tf.keras.layers.Embedding(input_dim=1000, output_dim=64)
   # Query embeddings of shape [batch_size, Tq, dimension].
   query_embeddings = token_embedding(query_input)
   # Value embeddings of shape [batch_size, Tv, dimension].

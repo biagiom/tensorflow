@@ -24,22 +24,24 @@ limitations under the License.
 namespace tflite {
 namespace gpu {
 namespace cl {
-namespace {
 
-std::string GetLSTMCode(const OperationDef& op_def, const CLDevice& device,
-                        Arguments* args) {
-  args->AddObjectRef(
-      "intermediate", AccessType::READ,
-      absl::make_unique<TensorDescriptor>(op_def.src_tensors[0]));
-  args->AddObjectRef(
-      "prev_state", AccessType::READ,
-      absl::make_unique<TensorDescriptor>(op_def.src_tensors[1]));
-  args->AddObjectRef(
-      "new_state", AccessType::WRITE,
-      absl::make_unique<TensorDescriptor>(op_def.dst_tensors[0]));
-  args->AddObjectRef(
-      "activation", AccessType::WRITE,
-      absl::make_unique<TensorDescriptor>(op_def.dst_tensors[1]));
+LSTM::LSTM(const OperationDef& definition) : GPUOperation(definition) {}
+
+LSTM::LSTM(LSTM&& kernel) : GPUOperation(std::move(kernel)) {}
+
+LSTM& LSTM::operator=(LSTM&& kernel) {
+  if (this != &kernel) {
+    GPUOperation::operator=(std::move(kernel));
+  }
+  return *this;
+}
+
+std::string LSTM::GetLSTMCode(const OperationDef& op_def,
+                              const CLDevice& device) {
+  AddSrcTensor("intermediate", op_def.src_tensors[0]);
+  AddSrcTensor("prev_state", op_def.src_tensors[1]);
+  AddDstTensor("new_state", op_def.dst_tensors[0]);
+  AddDstTensor("activation", op_def.dst_tensors[1]);
 
   std::string c = GetCommonDefines(op_def.precision);
   c += "__kernel void main_function(\n";
@@ -98,26 +100,9 @@ std::string GetLSTMCode(const OperationDef& op_def, const CLDevice& device,
   c += "}\n";
   return c;
 }
-}  // namespace
-
-LSTM::LSTM(const OperationDef& definition) : GPUOperation(definition) {}
-
-LSTM::LSTM(LSTM&& kernel)
-    : GPUOperation(std::move(kernel)),
-      kernel_(std::move(kernel.kernel_)),
-      work_group_size_(kernel.work_group_size_) {}
-
-LSTM& LSTM::operator=(LSTM&& kernel) {
-  if (this != &kernel) {
-    kernel_ = std::move(kernel.kernel_);
-    std::swap(work_group_size_, kernel.work_group_size_);
-    GPUOperation::operator=(std::move(kernel));
-  }
-  return *this;
-}
 
 absl::Status LSTM::Compile(const CreationContext& creation_context) {
-  std::string code = GetLSTMCode(definition_, *creation_context.device, &args_);
+  std::string code = GetLSTMCode(definition_, *creation_context.device);
   RETURN_IF_ERROR(
       args_.TransformToCLCode(creation_context.device->GetInfo(), {}, &code));
   return creation_context.cache->GetOrCreateCLKernel(
@@ -125,29 +110,11 @@ absl::Status LSTM::Compile(const CreationContext& creation_context) {
       *creation_context.device, &kernel_);
 }
 
-absl::Status LSTM::BindArguments() {
-  RETURN_IF_ERROR(args_.SetObjectRef("intermediate", src_[0]));
-  RETURN_IF_ERROR(args_.SetObjectRef("prev_state", src_[1]));
-  RETURN_IF_ERROR(args_.SetObjectRef("new_state", dst_[0]));
-  RETURN_IF_ERROR(args_.SetObjectRef("activation", dst_[1]));
-  return args_.Bind(kernel_.kernel());
-}
-
 int3 LSTM::GetGridSize() const {
   const int grid_x = dst_[0]->Batch();
   const int grid_y = dst_[0]->Slices();
   const int grid_z = 1;
   return int3(grid_x, grid_y, grid_z);
-}
-
-absl::Status LSTM::Tune(const TuningParameters& params) {
-  RETURN_IF_ERROR(BindArguments());
-  return GetBestWorkGroup(params, kernel_, GetGridSize(), &work_group_size_);
-}
-
-absl::Status LSTM::AddToQueue(CLCommandQueue* queue) {
-  RETURN_IF_ERROR(BindArguments());
-  return queue->DispatchImplicit(kernel_, GetGridSize(), work_group_size_);
 }
 
 LSTM CreateLSTM(const OperationDef& definition) { return LSTM(definition); }

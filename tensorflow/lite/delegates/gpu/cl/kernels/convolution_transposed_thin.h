@@ -37,10 +37,8 @@ namespace cl {
 class ConvolutionTransposedThin : public GPUOperation {
  public:
   ConvolutionTransposedThin() = default;
-  absl::Status AddToQueue(CLCommandQueue* queue) override;
-  absl::Status Tune(const TuningParameters& params) override;
-
   absl::Status Compile(const CreationContext& creation_context) override;
+  int3 GetGridSize() const override;
 
   // Move only
   ConvolutionTransposedThin(ConvolutionTransposedThin&& operation);
@@ -64,16 +62,13 @@ class ConvolutionTransposedThin : public GPUOperation {
   template <DataType S, typename T>
   void RearrangeWeightsData(const tflite::gpu::Tensor<OHWI, S>& weights,
                             absl::Span<T> dst);
-
-  absl::Status BindArguments();
-  int3 GetGridSize() const;
+  std::string GenerateConvolutionTransposedCode(const OperationDef& op_def,
+                                                int src_depth, int dst_channels,
+                                                const int2& kernel_size);
 
   int2 kernel_size_;
   int src_channels_;
   int dst_channels_;
-
-  CLKernel kernel_;
-  int3 work_group_size_ = int3(8, 4, 1);
 };
 
 template <DataType T>

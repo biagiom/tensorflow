@@ -41,9 +41,10 @@ namespace cl {
 class ConvPowerVR : public GPUOperation {
  public:
   ConvPowerVR() = default;
-  absl::Status AddToQueue(CLCommandQueue* queue) override;
   absl::Status Tune(const TuningParameters& params) override;
   absl::Status Compile(const CreationContext& creation_context) override;
+  absl::Status BindArguments() override;
+  int3 GetGridSize() const override;
 
   ConvWeightsDescription GetConvWeightsDescription() const {
     ConvWeightsDescription desc;
@@ -205,14 +206,13 @@ class ConvPowerVR : public GPUOperation {
                              bool different_weights_for_height,
                              const BHWC* dst_shape = nullptr) const;
 
-  absl::Status BindArguments();
-  int3 GetGridSize() const;
+  std::string GenerateConv(const CLDevice& device, const OperationDef& op_def,
+                           bool stride_correction,
+                           const ConvPowerVR::ConvParams& conv_params);
 
   int4 stride_padding_;
   int4 kernel_dilation_;
   ConvParams conv_params_;
-
-  CLKernel kernel_;
 };
 
 template <DataType T>
