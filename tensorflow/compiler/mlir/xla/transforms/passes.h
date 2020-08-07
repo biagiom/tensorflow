@@ -53,6 +53,9 @@ void PopulateLegalizeTfWithTf2XlaPatterns(llvm::StringRef device_type,
 void PopulateLegalizeTfPatterns(MLIRContext* context,
                                 OwningRewritePatternList* patterns);
 
+/// Checks whether the op is supported by the Tf2Xla fallback for legalization.
+bool IsOpAllowedTf2XlaFallback(Operation* op);
+
 /// Lowers from TF dialect's control flow to HLO dialect's control flow.
 std::unique_ptr<OperationPass<ModuleOp>> createLegalizeTFControlFlowPass();
 
@@ -62,6 +65,10 @@ std::unique_ptr<OperationPass<ModuleOp>> createLegalizeTFControlFlowPass();
 /// that can't be legalized.
 LogicalResult legalizeTF(Operation* op, bool allow_partial_conversion = false,
                          bool legalize_chlo = true);
+
+// Legalizes TF/XLA communication ops (TF dialect) to HLO dialect communication
+// ops.
+std::unique_ptr<OperationPass<ModuleOp>> CreateLegalizeTFCommunicationPass();
 
 }  // namespace mhlo
 }  // namespace mlir

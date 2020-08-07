@@ -124,8 +124,8 @@ struct ConvertRankedDynamicBroadcastBinaryOp
 
     int64_t result_rank = std::max(lhs_type.getRank(), rhs_type.getRank());
     Value result_extents =
-        hlo::ComputeBinaryElementwiseBroadcastingResultExtents(loc, lhs, rhs,
-                                                               rewriter);
+        hlo::ComputeBinaryElementwiseBroadcastingResultExtents(
+            loc, lhs, rhs, rewriter, /*unsafe_as_extent_tensor=*/true);
 
     // Note that we unconditionally emit DynamicBroadcastInDim ops and let
     // downstream canonicalizations fold them away if possible. This is
@@ -350,22 +350,18 @@ struct ConvertUnrankedDynamicBroadcastBinaryOp
     // TODO(tpopp): Return extent tensors when possible to signal that this is a
     // guaranteed safe broadcast by construction.
     Value extended_lhs = if_builder.create<shape::BroadcastOp>(
-        loc, lhs_shape, ranked_shape_val, nullptr);
+        loc, extent_tensor_type, lhs_shape, ranked_shape_val, nullptr);
     Value extended_rhs = if_builder.create<shape::BroadcastOp>(
-        loc, rhs_shape, ranked_shape_val, nullptr);
-    Value lhs_extent_tensor = if_builder.create<shape::ToExtentTensorOp>(
-        loc, extent_tensor_type, extended_lhs);
-    Value rhs_extent_tensor = if_builder.create<shape::ToExtentTensorOp>(
-        loc, extent_tensor_type, extended_rhs);
+        loc, extent_tensor_type, rhs_shape, ranked_shape_val, nullptr);
 
     // 1. Reshape operands to the given rank (with the same number of elements)
     // 2. Compute the ranked-broadcasted ChloOp (which will assert that the ops
     //    can be broadcasted and do the actual broadcasting)
     // 3. Type erase the output back to unranked
     Value reshaped_lhs = if_builder.create<mhlo::DynamicReshapeOp>(
-        loc, reshaped_type, lhs, lhs_extent_tensor);
+        loc, reshaped_type, lhs, extended_lhs);
     Value reshaped_rhs = if_builder.create<mhlo::DynamicReshapeOp>(
-        loc, reshaped_type, rhs, rhs_extent_tensor);
+        loc, reshaped_type, rhs, extended_rhs);
     Value result = if_builder.create<ChloOpTy>(
         loc, ArrayRef<Type>{reshaped_type},
         ArrayRef<Value>{reshaped_lhs, reshaped_rhs}, op.getAttrs());

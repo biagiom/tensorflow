@@ -22,10 +22,10 @@ limitations under the License.
 #include <memory>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
@@ -376,7 +376,7 @@ class AddOperationParser : public TFLiteOperationParser {
     Node* node = graph->NewNode();
     node->operation.type = ToString(OperationType::ADD);
     RETURN_IF_ERROR(reader->AddOutputs(node));
-    AddAttributes attr;
+    ElementwiseAttributes attr;
     RETURN_IF_ERROR(ParseInputsWithConstTensor(node, reader, &attr.param));
     node->operation.attributes = std::move(attr);
     const TfLiteAddParams* tf_options;
@@ -847,6 +847,8 @@ class ElementwiseOperationParser : public TFLiteOperationParser {
                                                         /*outputs=*/1));
       ElementwiseAttributes attr;
       RETURN_IF_ERROR(ParseInputsWithConstTensor(node, reader, &attr.param));
+      attr.runtime_tensor_is_second =
+          IsConstantTensor(reader->GetInputTensor(0));
       node->operation.attributes = std::move(attr);
     } else {
       return absl::InvalidArgumentError("Incorrect operation type passed");
@@ -1255,7 +1257,7 @@ class MulOperationParser : public TFLiteOperationParser {
                                    const TfLiteIntArray* constant_dims,
                                    GraphFloat32* graph, ObjectReader* reader) {
     RETURN_IF_ERROR(reader->AddInput(node, runtime_tensor));
-    MultiplyAttributes attr;
+    ElementwiseAttributes attr;
     if (constant_dims->size <= 0 || NumElements(constant_dims) == 1) {
       Tensor<Scalar, DataType::FLOAT32> tensor;
       RETURN_IF_ERROR(reader->ReadTensor(constant_tensor, &tensor));
@@ -2882,8 +2884,8 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context, bool allow_quant_ops,
 // guarantee that the order will match the source model tensors order.
 absl::Status PrecreateIOTensors(
     TfLiteContext* context, GraphFloat32* graph, TfLiteIntArray* io_tensors,
-    std::unordered_map<int, int>* quant_conversion_map,
-    std::unordered_map<int, Value*>* tensor_to_value) {
+    absl::flat_hash_map<int, int>* quant_conversion_map,
+    absl::flat_hash_map<int, Value*>* tensor_to_value) {
   for (int i = 0; i < io_tensors->size; ++i) {
     const int tensor_index = io_tensors->data[i];
     const TfLiteTensor& tflite_tensor = context->tensors[tensor_index];
@@ -2897,7 +2899,7 @@ absl::Status PrecreateIOTensors(
 absl::Status BuildModel(TfLiteContext* context,
                         const TfLiteDelegateParams* delegate_params,
                         GraphFloat32* graph,
-                        std::unordered_map<int, int>* quant_conversion_map) {
+                        absl::flat_hash_map<int, int>* quant_conversion_map) {
   std::vector<std::unique_ptr<TFLiteOperationParser>> operations;
   std::vector<int> tflite_nodes;
   for (int i = 0; i < delegate_params->nodes_to_replace->size; ++i) {
@@ -2923,7 +2925,7 @@ absl::Status BuildModel(TfLiteContext* context,
     operations.push_back(std::move(op_parser));
     tflite_nodes.push_back(i);
   }
-  std::unordered_map<int, Value*> tensor_to_value;
+  absl::flat_hash_map<int, Value*> tensor_to_value;
   RETURN_IF_ERROR(PrecreateIOTensors(context, graph,
                                      delegate_params->input_tensors,
                                      quant_conversion_map, &tensor_to_value));
@@ -2950,7 +2952,7 @@ absl::Status BuildModel(TfLiteContext* context,
 
 absl::Status BuildFinalModel(
     TfLiteContext* context, const TfLiteDelegateParams* delegate_params,
-    GraphFloat32* graph, std::unordered_map<int, int>* quant_conversion_map) {
+    GraphFloat32* graph, absl::flat_hash_map<int, int>* quant_conversion_map) {
   RETURN_IF_ERROR(
       BuildModel(context, delegate_params, graph, quant_conversion_map));
 

@@ -629,8 +629,8 @@ tf_gen_op_libs(
         "io_ops",
         "linalg_ops",
         "list_ops",
+        "map_ops",
         "lookup_ops",
-        "logging_ops",
         "manip_ops",
         "math_ops",
         "mkl_nn_ops",
@@ -661,6 +661,19 @@ tf_gen_op_libs(
     deps = [
         ":lib",
         ":protos_all_cc",
+    ],
+)
+
+tf_gen_op_libs(
+    is_external = False,
+    op_lib_names = [
+        "logging_ops",
+    ],
+    deps = [
+        ":lib",
+        ":protos_all_cc",
+        # TODO(b/162630222): remove this dependency.
+        "//tensorflow/c/kernels:summary_op_lib",
     ],
 )
 
@@ -831,6 +844,7 @@ cc_library(
         ":io_ops_op_lib",
         ":linalg_ops_op_lib",
         ":list_ops_op_lib",
+        ":map_ops_op_lib",
         ":logging_ops_op_lib",
         ":lookup_ops_op_lib",
         ":manip_ops_op_lib",
@@ -863,6 +877,7 @@ cc_library(
         ":user_ops_op_lib",
         ":word2vec_ops",
         "//tensorflow/c/kernels:bitcast_op_lib",
+        "//tensorflow/c/kernels:summary_op_lib",
         "//tensorflow/compiler/mlir/tensorflow:mlir_passthrough_op",
     ] + if_chromiumos(
         [],
@@ -970,6 +985,7 @@ cc_library(
     name = "all_kernels_impl",
     visibility = [":__subpackages__"],
     deps = [
+        "//tensorflow/c/kernels:summary_op",
         "//tensorflow/c/kernels:bitcast_op",
         "//tensorflow/core/kernels:array",
         "//tensorflow/core/kernels:audio",
@@ -996,7 +1012,7 @@ cc_library(
         "//tensorflow/core/kernels:histogram_op",
         "//tensorflow/core/kernels:image",
         "//tensorflow/core/kernels:io",
-        "//tensorflow/core/kernels:linalg",
+        "//tensorflow/core/kernels/linalg:linalg",
         "//tensorflow/core/kernels:lookup",
         "//tensorflow/core/kernels:logging",
         "//tensorflow/core/kernels:manip",
@@ -1093,6 +1109,8 @@ cc_library(
         # these also dynamically loading.
         "//tensorflow/core/kernels:dataset_ops",  # Depends on grappler
         "//tensorflow/core/kernels:list_kernels",  # Depends on variant_op_registry.h
+        "//tensorflow/core/kernels:map_kernels",
+        "//tensorflow/core/kernels:tensor_map",
     ],
 )
 
@@ -1899,6 +1917,7 @@ cc_library(
         "//tensorflow/core/platform:platform_port",
         "//tensorflow/core/platform:platform_strings",
         "//tensorflow/core/platform:prefetch",
+        "//tensorflow/core/platform:profile_utils_cpu_utils",
         "//tensorflow/core/platform:protobuf_internal",
         "//tensorflow/core/platform:regexp",
         "//tensorflow/core/platform:resource",

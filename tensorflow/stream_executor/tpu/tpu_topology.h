@@ -22,7 +22,7 @@ limitations under the License.
 namespace tensorflow {
 namespace tpu {
 
-struct TpuChipCoordinatesExternal {
+struct TpuDimensionsExternal {
   int x;
   int y;
   int z;
@@ -33,12 +33,23 @@ class TpuCoreLocationExternal {
   TpuCoreLocationExternal() : core_location_(nullptr) {}
   explicit TpuCoreLocationExternal(void* core_location)
       : core_location_(core_location) {}
-  TpuChipCoordinatesExternal chip_coordinates() const;
+  TpuDimensionsExternal chip_coordinates() const;
+  TpuDimensionsExternal host_coordinates() const;
   int32 index() const;
   int32 Id() const;
 
  private:
   void* core_location_;
+};
+
+class TpuHostLocationExternal {
+ public:
+  explicit TpuHostLocationExternal(void* host_location)
+      : host_location_(host_location) {}
+  int32 Id() const;
+
+ private:
+  void* host_location_;
 };
 
 struct TpuTopologyChipBoundsExternal {
@@ -56,6 +67,7 @@ class TpuTopologyExternal {
   bool HasChip(int x, int y, int z) const;
   TpuCoreLocationExternal Core(int x, int y, int z, TpuCoreTypeEnum core_type,
                                int index) const;
+  int IdForHost(TpuDimensionsExternal host) const;
 
  private:
   void* topology_;

@@ -23,6 +23,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "tensorflow/core/data/dataset.pb.h"
 #include "tensorflow/core/data/service/data_service.h"
+#include "tensorflow/core/data/service/grpc_util.h"
 #include "tensorflow/core/distributed_runtime/rpc/grpc_util.h"
 #include "tensorflow/core/framework/dataset.h"
 #include "tensorflow/core/framework/model.h"
@@ -195,6 +196,7 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
 
     void CancelThreads() TF_LOCKS_EXCLUDED(mu_) {
       mutex_lock l(mu_);
+      VLOG(1) << "Cancelling threads in DataServiceDataset::Iterator";
       cancelled_ = true;
       worker_thread_cv_.notify_all();
       manager_thread_cv_.notify_all();
@@ -209,13 +211,23 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
           &deregister_fn_));
       DataServiceDispatcherClient dispatcher(dataset()->address_,
                                              dataset()->protocol_);
+      int64 deadline_micros = ctx->env()->NowMicros() + kRetryTimeoutMicros;
       if (dataset()->job_name_.empty()) {
-        TF_RETURN_IF_ERROR(dispatcher.CreateJob(
-            dataset()->dataset_id_, dataset()->processing_mode_, &job_id_));
+        TF_RETURN_IF_ERROR(grpc_util::Retry(
+            [&]() {
+              return dispatcher.CreateJob(dataset()->dataset_id_,
+                                          dataset()->processing_mode_,
+                                          &job_id_);
+            },
+            "create job", deadline_micros));
       } else {
-        TF_RETURN_IF_ERROR(dispatcher.GetOrCreateJob(
-            dataset()->dataset_id_, dataset()->processing_mode_,
-            dataset()->job_name_, iterator_index_, &job_id_));
+        TF_RETURN_IF_ERROR(grpc_util::Retry(
+            [&]() {
+              return dispatcher.GetOrCreateJob(
+                  dataset()->dataset_id_, dataset()->processing_mode_,
+                  dataset()->job_name_, iterator_index_, &job_id_);
+            },
+            "get or create job", deadline_micros));
       }
       VLOG(1) << "Created data service job with id " << job_id_;
       return Status::OK();
@@ -295,7 +307,9 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
     // TODO(aaudibert): Instead of polling, have dispatcher send updates when
     // the list of tasks changes.
     void TaskThreadManager(std::unique_ptr<IteratorContext> ctx) {
-      VLOG(3) << "Starting task thread manager";
+      auto cleanup =
+          gtl::MakeCleanup([] { VLOG(1) << "Task thread manager exiting"; });
+      VLOG(1) << "Starting task thread manager";
       DataServiceDispatcherClient dispatcher(dataset()->address_,
                                              dataset()->protocol_);
       uint64 next_check = Env::Default()->NowMicros();
@@ -335,7 +349,7 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
       }
       absl::flat_hash_map<int64, TaskInfo> task_id_to_task;
       for (auto& task : tasks) {
-        task_id_to_task[task.id()] = task;
+        task_id_to_task[task.task_id()] = task;
       }
       mutex_lock l(mu_);
       job_finished_ = job_finished;
@@ -368,8 +382,9 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
           get_next_cv_.notify_all();
           continue;
         }
-        tasks_.push_back(std::make_shared<Task>(
-            task_info.id(), task_info.worker_address(), std::move(worker)));
+        tasks_.push_back(std::make_shared<Task>(task_info.task_id(),
+                                                task_info.worker_address(),
+                                                std::move(worker)));
       }
       if (dataset()->max_outstanding_requests_ == model::kAutotune) {
         // Adjust max_outstanding_requests to account for newly added tasks.
@@ -396,8 +411,11 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
     }
 
     void RunWorkerThread(std::function<void()> done) {
-      auto cleanup = gtl::MakeCleanup([done = std::move(done)]() { done(); });
-      VLOG(3) << "Starting worker thread";
+      auto cleanup = gtl::MakeCleanup([done = std::move(done)]() {
+        done();
+        VLOG(1) << "Worker thread exiting";
+      });
+      VLOG(1) << "Starting worker thread";
       std::shared_ptr<Task> task_to_process;
       while (true) {
         {

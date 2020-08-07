@@ -52,6 +52,7 @@ from __future__ import print_function
 import argparse
 import csv
 import datetime
+import os
 import os.path
 import platform
 import subprocess
@@ -77,7 +78,7 @@ parser.add_argument(
 parser.add_argument(
     "--bucket",
     type=str,
-    default="gs://tensorflow-testing-bucket",
+    default="gs://tf-sizetracker-artifacts",
     help="GCS bucket for artifacts.")
 parser.add_argument(
     "--team",
@@ -92,6 +93,10 @@ parser.add_argument(
     "--dry_run",
     action="store_true",
     help="Dry run: do not load to BigQuery or upload to GCS.")
+parser.add_argument(
+    "--job",
+    type=str,
+    help="Name of job calling this script. Default: $KOKORO_JOB_NAME.")
 parser.add_argument(
     "--print_schema",
     action="store_true",
@@ -140,6 +145,7 @@ SCHEMA = ",".join([
     "team:string",
     "logged_date:timestamp",
     "uploaded_to:string",
+    "job:string",
 ])
 # Select the earliest recorded commit in the same table for the same artifact
 # and team. Used to determine the full range of tested commits for each
@@ -241,8 +247,8 @@ def get_all_tested_commits():
   # COMMIT_HASH
   earliest_commit = gcloud(
       "bq", [
-          "--project_id", FLAGS.project, "query", "--format", "csv",
-          "--nouse_legacy_sql"
+          "--project_id", FLAGS.project, "--headless", "-q", "query",
+          "--format", "csv", "--nouse_legacy_sql"
       ],
       stdin=query_earliest_included_commit)
 
@@ -273,7 +279,7 @@ def get_upload_path():
   if FLAGS.upload and FLAGS.artifact:
     artifact_filename = os.path.basename(FLAGS.artifact.name)
     ts = datetime.datetime.now(
-        datetime.timezone.utc).isoformat(timespec="seconds")
+        datetime.timezone.utc).replace(microsecond=0).isoformat()
     # note: not os.path.join here, because gsutil is always linux-style
     # Using a timestamp prevents duplicate entries
     path = "{bucket}/{team}/{artifact_id}/{now}.{artifact_filename}".format(
@@ -313,6 +319,7 @@ def build_row():
       FLAGS.team,
       current_time,
       get_upload_path(),
+      FLAGS.job,
   ]
 
 
@@ -329,6 +336,9 @@ def main():
         "specified.\nYou must also specify one of --artifact or --manual_bytes."
         "\nPass -h or --help for usage.")
     exit(1)
+
+  if not FLAGS.job:
+    FLAGS.job = os.environ.get("KOKORO_JOB_NAME", "NO_JOB")
 
   # Generate data about this artifact into a Tab Separated Value file
   next_tsv_row = build_row()
@@ -350,8 +360,9 @@ def main():
       writer = csv.writer(tsvfile, delimiter="\t", quoting=csv.QUOTE_MINIMAL)
       writer.writerow(next_tsv_row)
     gcloud("bq", [
-        "--project_id", FLAGS.project, "load", "--source_format", "CSV",
-        "--field_delimiter", "tab", PROJECT_LEVEL_TABLE_NAME, "data.tsv", SCHEMA
+        "--project_id", FLAGS.project, "--headless", "-q", "load",
+        "--source_format", "CSV", "--field_delimiter", "tab",
+        PROJECT_LEVEL_TABLE_NAME, "data.tsv", SCHEMA
     ])
 
 

@@ -104,7 +104,6 @@ StatusOr<std::unique_ptr<PyBuffer>> PyClient::BufferFromPyval(
     return InvalidArgument("from_python argument must be an array.");
   }
 
-  TF_ASSIGN_OR_RETURN(PythonBufferTree tree, GetPythonBufferTree(argument));
   std::shared_ptr<PythonRefManager::ManagedPyObjects> py_buffer_ref =
       GlobalPyRefManager()->ManageReference(std::move(c->array));
 
@@ -124,15 +123,19 @@ StatusOr<std::unique_ptr<PyBuffer>> PyClient::BufferFromPyval(
 StatusOr<std::unique_ptr<PyExecutable>> PyClient::Compile(
     const XlaComputation& computation, CompileOptions options) {
   std::unique_ptr<PjRtExecutable> executable;
+  absl::optional<std::string> fingerprint;
   {
     py::gil_scoped_release gil_release;
     TF_ASSIGN_OR_RETURN(executable,
                         PjRtExecutable::Compile(computation, pjrt_client_.get(),
                                                 std::move(options)));
+    TF_ASSIGN_OR_RETURN(fingerprint,
+                        pjrt_client_->ExecutableFingerprint(*executable));
   }
   auto traceback = Traceback::Get();
   return std::make_unique<PyExecutable>(
-      shared_from_this(), std::move(executable), std::move(traceback));
+      shared_from_this(), std::move(executable), std::move(traceback),
+      std::move(fingerprint));
 }
 
 class ProfileBuilder {

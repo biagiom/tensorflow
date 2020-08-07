@@ -40,6 +40,7 @@ int64_t TpuPlatform_VisibleDeviceCount(SE_Platform* platform);
 int64_t TpuPlatform_TpuMemoryLimit(SE_Platform* platform);
 bool TpuPlatform_ShouldRegisterTpuDeviceToDeviceCopy(SE_Platform* platform);
 void* TpuPlatform_GetTopologyPtr(SE_Platform* platform);
+void* TpuPlatform_GetHostLocation(SE_Platform* platform);
 
 void TpuExecutor_Init(SE_StreamExecutor* executor, int device_ordinal,
                       SE_DeviceOptions* device_options, SE_Status* status);
@@ -195,11 +196,15 @@ int TpuTopology_ChipBounds_Z(void* tpu_topology);
 bool TpuTopology_HasChip(void* tpu_topology, int x, int y, int z);
 void* TpuTopology_Core(void* tpu_topology, int x, int y, int z,
                        TpuCoreTypeEnum tpu_core_type, int index);
-int TpuCoreLocation_ChipCoordinates_X(void* tpu_core_location);
-int TpuCoreLocation_ChipCoordinates_Y(void* tpu_core_location);
-int TpuCoreLocation_ChipCoordinates_Z(void* tpu_core_location);
+int TpuTopology_IdForHost(void* tpu_topology, int x, int y, int z);
+void TpuCoreLocation_ChipCoordinates(void* tpu_core_location, int* x, int* y,
+                                     int* z);
+void TpuCoreLocation_HostCoordinates(void* tpu_core_location, int* x, int* y,
+                                     int* z);
 int TpuCoreLocation_Index(void* tpu_core_location);
 int TpuCoreLocation_Id(void* tpu_core_location);
+
+int TpuHostLocation_Id(void* tpu_host_location);
 
 // C API for XLA::Compiler interface
 
@@ -253,6 +258,7 @@ struct TfTpu_ExecutorApiFn {
   TFTPU_ADD_FN_IN_STRUCT(TpuPlatform_TpuMemoryLimit);
   TFTPU_ADD_FN_IN_STRUCT(TpuPlatform_ShouldRegisterTpuDeviceToDeviceCopy);
   TFTPU_ADD_FN_IN_STRUCT(TpuPlatform_GetTopologyPtr);
+  TFTPU_ADD_FN_IN_STRUCT(TpuPlatform_GetHostLocation);
 
   TFTPU_ADD_FN_IN_STRUCT(TpuExecutor_Init);
   TFTPU_ADD_FN_IN_STRUCT(TpuExecutor_Free);
@@ -341,11 +347,14 @@ struct TfTpu_ExecutorApiFn {
   TFTPU_ADD_FN_IN_STRUCT(TpuTopology_ChipBounds_Z);
   TFTPU_ADD_FN_IN_STRUCT(TpuTopology_HasChip);
   TFTPU_ADD_FN_IN_STRUCT(TpuTopology_Core);
-  TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_ChipCoordinates_X);
-  TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_ChipCoordinates_Y);
-  TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_ChipCoordinates_Z);
+  TFTPU_ADD_FN_IN_STRUCT(TpuTopology_IdForHost);
+
+  TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_ChipCoordinates);
+  TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_HostCoordinates);
   TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_Index);
   TFTPU_ADD_FN_IN_STRUCT(TpuCoreLocation_Id);
+
+  TFTPU_ADD_FN_IN_STRUCT(TpuHostLocation_Id);
 
   TFTPU_ADD_FN_IN_STRUCT(TpuCompiler_New);
   TFTPU_ADD_FN_IN_STRUCT(TpuCompiler_Free);

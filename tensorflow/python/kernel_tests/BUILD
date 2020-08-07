@@ -130,6 +130,28 @@ cuda_py_test(
     ],
 )
 
+# TODO(kattian): add GPU capability and change to cuda_py_test
+tf_py_test(
+    name = "map_ops_test",
+    size = "small",
+    srcs = ["map_ops_test.py"],
+    grpc_enabled = True,
+    deps = [
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:gradients_impl",
+        "//tensorflow/python:map_ops",
+        "//tensorflow/python:math_ops",
+        "//tensorflow/python:tensor_shape",
+        "//tensorflow/python/eager:context",
+        "//tensorflow/python/eager:def_function",
+        "//third_party/py/numpy",
+        "@absl_py//absl/testing:parameterized",
+    ],
+)
+
 cuda_py_test(
     name = "benchmark_test",
     size = "small",
@@ -2036,20 +2058,6 @@ cuda_py_test(
 )
 
 cuda_py_test(
-    name = "gather_op_test",
-    size = "medium",
-    srcs = ["gather_op_test.py"],
-    deps = [
-        "//tensorflow/python:array_ops",
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python:framework_for_generated_wrappers",
-        "//tensorflow/python:gradients",
-        "//third_party/py/numpy",
-        "@absl_py//absl/testing:parameterized",
-    ],
-)
-
-cuda_py_test(
     name = "gradient_correctness_test",
     size = "small",
     srcs = ["gradient_correctness_test.py"],
@@ -2452,18 +2460,6 @@ cuda_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
         "//third_party/py/numpy",
-    ],
-)
-
-cuda_py_test(
-    name = "session_ops_test",
-    size = "small",
-    srcs = ["session_ops_test.py"],
-    deps = [
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python:framework_for_generated_wrappers",
-        "//tensorflow/python:math_ops",
-        "//tensorflow/python:session_ops",
     ],
 )
 

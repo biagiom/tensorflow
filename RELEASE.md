@@ -25,7 +25,14 @@
     * Code that requires very tricky shape manipulation via converted op layers in order to work, where the Keras symbolic shape inference proves insufficient.
     * Code that tries manually walking a `tf.keras.Model` layer by layer and assumes layers only ever have one positional argument. This assumption doesn't hold true before TF 2.4 either, but is more likely to cause issues know.
     * Code that manually enters `keras.backend.get_graph()` before building a functional model. This is no longer needed.
-
+* Start enforcing input shape assumptions when calling Functional API Keras
+  models. This may potentially break some users, in case there is a mismatch
+  between the shape used when creating `Input` objects in a Functional model,
+  and the shape of the data passed to that model. You can fix this mismatch by
+  either calling the model with correctly-shaped data, or by relaxing `Input`
+  shape assumptions (note that you can pass shapes with `None` entries for axes
+  that are meant to be dynamic). You can also disable the input checking
+  entirely by setting `model.input_spec = None`.
 
 ## Known Caveats
 
@@ -65,6 +72,11 @@
      `tf.data.experimental.service.from_dataset_id` APIs to enable one process
       to register a dataset with the tf.data service, and another process to
       consume data from the dataset.
+    * Added support for tf.data service dispatcher fault tolerance. To enable
+      fault tolerance, configure a `work_dir` when running your dispatcher
+      server and set `dispatcher_fault_tolerance=True`. The dispatcher will
+      store its state to `work_dir`, so that on restart it can continue from its
+      previous state after restart.
     * Added optional `exclude_cols` parameter to CsvDataset. This parameter is
       the complement of `select_cols`; at most one of these should be specified.
     * We have implemented an optimization which reorders data-discarding
@@ -88,6 +100,7 @@
       * Error messages when Functional API construction goes wrong (and when ops cannot be converted to Keras layers automatically) should be clearer and easier to understand.
     * `Optimizer.minimize` can now accept a loss `Tensor` and a `GradientTape`
       as an alternative to accepting a `callable` loss.
+    * Added `beta` parameter to FTRL optimizer to match paper.
 * `tf.function` / AutoGraph:
   * Added `experimental_follow_type_hints` argument for `tf.function`. When
     True, the function may use type annotations to optimize the tracing
@@ -104,8 +117,13 @@
 *   Math and Linear Algebra:
     * <ADD RELEASE NOTES HERE>
 *   TPU Enhancements:
+    * Added support for the `beta` parameter of the FTRL optimizer for TPU
+      embeddings. Users of other TensorFlow platforms can implement equivalent
+      behavior by adjusting the `l2` parameter.
     * <ADD RELEASE NOTES HERE>
 *   XLA Support:
+    * xla.experimental.compile is deprecated, use
+      `tf.function(experimental_compile=True)` instead
     * <ADD RELEASE NOTES HERE>
 *   Tracing and Debugging:
     * <ADD RELEASE NOTES HERE>
