@@ -57,6 +57,14 @@ inline void InfiniteLoop() {
 
 #endif  // TF_LITE_MCU_DEBUG_LOG
 
+// Uncomment the following 3 lines in order to undefine NDEBUG macro
+// so that TFLITE_ASSERT_FALSE will be defined with TFLITE_ABORT.
+// Commenting them will result in #define TFLITE_ASSERT_FALSE (static_cast<void>(0))
+// and so the code will not block in a loop (the assertion has no effect).
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #ifdef NDEBUG
 #define TFLITE_ASSERT_FALSE (static_cast<void>(0))
 #else
