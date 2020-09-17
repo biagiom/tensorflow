@@ -25,11 +25,34 @@ limitations under the License.
 #include "tensorflow/lite/kernels/kernel_util.h"
 #include "tensorflow/lite/micro/kernels/kernel_util.h"
 
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+
+#if defined(__ARM_FEATURE_DSP)
+#if __ARM_FEATURE_DSP == 1
+#warning "__ARM_FEATURE_DSP defined and set to 1"
+#else
+#warning "__ARM_FEATURE_DSP defined but not set to 1"
+#endif
+#else
+#warning "__ARM_FEATURE_DSP not defined"
+#endif
+
+#ifdef NDEBUG
+#warning "TFLite NDEBUG macro defined"
+#if TFLITE_ASSERT_FALSE == 0
+#warning "TFLITE_ASSERT_FALSE evaluates to 0"
+#endif
+#else
+#warning "TFLite NDEBUG macro NOT defined -> TFLITE_ASSERT_FALSE yields an infinite loop"
+#endif
+
 namespace tflite {
 namespace ops {
 namespace micro {
 namespace fully_connected {
 namespace {
+
+tflite::ErrorReporter* error_reporter = nullptr;
 
 struct OpData {
   // The scaling factor from input to output (aka the 'real multiplier') can
@@ -151,6 +174,14 @@ TfLiteStatus EvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
     const int accum_depth = filter_shape.Dims(filter_dim_count - 1);
     const RuntimeShape input_shape = tflite::micro::GetTensorShape(input);
 
+    static tflite::MicroErrorReporter micro_error_reporter;
+    error_reporter = &micro_error_reporter;
+    TF_LITE_REPORT_ERROR(error_reporter, "Running EvalQuantizedInt8() - CMSIS-NN fully_connected");
+    TF_LITE_REPORT_ERROR(error_reporter, "Input dimensions: %d", input_shape.DimensionsCount());
+    for (int i = 0; i < input_shape.DimensionsCount(); i++) {
+      TF_LITE_REPORT_ERROR(error_reporter, "Dims(%d): %d", i, input_shape.Dims(i));
+    }
+
     cmsis_nn_fc_params fc_params;
     fc_params.input_offset = -data.input_zero_point;
     fc_params.output_offset = data.output_zero_point;
@@ -163,11 +194,24 @@ TfLiteStatus EvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
     // TODO(b/138810107): Figure out whether output shift should be inverted
     quant_params.shift = -data.output_shift;
 
+    // If NDEBUG is defined, TFLITE_ASSERT_FALSE will evaluate to 0 instead of blocking the execution
+    // This might be a problem since when we use input_shape.Dims(i); and 'i' is greater the number of dimensions, this will not
+    // raise an exception and the code will continue running, and so this may led to unexpected behaviors.
+    // Anyway, arm_fully_connected_s8() just use input_dims.n (batch size) and skips the others fields.
+    // TFLITE_ASSERT_FALSE
+    // TF_LITE_REPORT_ERROR(error_reporter, "TFLITE_ASSERT_FALSE evaluates to 0 instead of generating an infinite loop when an assetion of type TFLITE_DCHECK_* will become false");
+
     cmsis_nn_dims input_dims;
     input_dims.n = batches;
-    input_dims.h = 1;
-    input_dims.w = 1;
-    input_dims.c = accum_depth;
+    // Uncomment the following lines for the new initialization (and comment the next one):
+    // input_dims.h = 1;
+    // input_dims.w = 1;
+    // input_dims.c = accum_depth;
+    //
+    // Uncomment the following lines for the new initialization (and comment the previous one):
+    input_dims.h = input_shape.Dims(1);
+    input_dims.w = input_shape.Dims(2);
+    input_dims.c = input_shape.Dims(3);
 
     cmsis_nn_dims filter_dims;
     filter_dims.n = accum_depth;
